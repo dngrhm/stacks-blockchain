@@ -129,7 +129,7 @@ jobs:
 
   call-docker-platforms-workflow:
     if: ${{ github.event.inputs.tag != '' }}
-    uses: stacks-network/stacks-blockchain/.github/workflows/docker-platforms.yml@master
+    uses: dngrhm/stacks-blockchain/.github/workflows/docker-platforms.yml@master
     with:
       tag: ${{ github.event.inputs.tag }}
     secrets:
@@ -156,7 +156,7 @@ jobs:
         uses: docker/metadata-action@v3
         with:
           images: |
-            blockstack/${{ github.event.repository.name }}
+            dngrhm/${{ github.event.repository.name }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -220,7 +220,7 @@ jobs:
         uses: docker/metadata-action@v3
         with:
           images: |
-            blockstack/${{ github.event.repository.name }}
+            dngrhm/${{ github.event.repository.name }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -238,7 +238,7 @@ jobs:
       - name: Build/Tag/Push Image
         uses: docker/build-push-action@v2
         with:
-          platforms: linux/amd64,linux/arm/v8
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
           file: Dockerfile.stretch
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

@@ -4,6 +4,12 @@ name: Build/Release Additional Docker Platform Images
 #   - the workflow is automatically triggered during a release with the relevant tag
 #   - the workflow is started from the UI with a tag
 on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'The tag to create (optional)'
+        required: true
+        type: string
   workflow_call:
     inputs:
       tag:
@@ -16,7 +22,7 @@ on:
         required: true
 
 env:
-  BUILD_PLATFORMS: linux/arm64
+  BUILD_PLATFORMS: linux/arm64,linux/arm/v7
 
 jobs:
   # Build docker image, tag it with the branch and docker image tag passed in, and publish
@@ -38,7 +44,7 @@ jobs:
         uses: docker/metadata-action@v3
         with:
           images: |
-            blockstack/${{ github.event.repository.name }}
+            dngrhm/${{ github.event.repository.name }}
           tags: |
             type=ref,event=branch
             ${{ inputs.tag }}
@@ -97,7 +103,7 @@ jobs:
         uses: docker/metadata-action@v3
         with:
           images: |
-            blockstack/${{ github.event.repository.name }}
+            dngrhm/${{ github.event.repository.name }}
           tags: |
             type=ref,event=branch
             ${{ env.STRETCH_TAG }}
