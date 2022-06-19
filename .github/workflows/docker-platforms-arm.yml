@@ -39,15 +39,23 @@ jobs:
       uses: docker/setup-buildx-action@v1
       id: buildx
 
-    - uses: pguyot/arm-runner-action@v2
-      with:
-        base_image: raspios_lite_arm64:latest
-        commands: |
-          docker buildx build \
-          --platform linux/arm64 \
-          --build-arg VERSION=$VERSION \
-          --tag ${{ secrets.DOCKER_HUB_USER }}/stacks-blockchain:mainfest-arm64 \
-          --output "type=registry" .
+    - name: Run Docker buildx
+      run: |
+        docker buildx build \
+        --platform linux/amd64,linux/arm64,linux/arm/v8 \
+        --build-arg VERSION=$VERSION \
+        --tag ${{ secrets.DOCKER_HUB_USER }}/stacks-blockchain:mainfest-arm64 \
+        --output "type=registry" .
+
+    # - uses: pguyot/arm-runner-action@v2
+    #   with:
+    #     base_image: raspios_lite_arm64:latest
+    #     commands: |
+    #       docker buildx build \
+    #       --platform linux/arm64 \
+    #       --build-arg VERSION=$VERSION \
+    #       --tag ${{ secrets.DOCKER_HUB_USER }}/stacks-blockchain:mainfest-arm64 \
+    #       --output "type=registry" .
 
   #     - name: Set Vars
   #       run: |
