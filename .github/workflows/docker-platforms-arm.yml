@@ -42,7 +42,7 @@ jobs:
     - name: Run Docker buildx
       run: |
         docker buildx build \
-        --platform linux/arm64,linux/arm/v7 \
+        --platform linux/arm64 \
         --build-arg VERSION=$VERSION \
         --tag ${{ secrets.DOCKERHUB_USERNAME }}/stacks-blockchain:mainfest-arm64 \
         --output "type=registry" .
