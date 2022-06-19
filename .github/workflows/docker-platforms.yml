@@ -16,7 +16,7 @@ on:
         required: true
 
 env:
-  BUILD_PLATFORMS: linux/arm64
+  BUILD_PLATFORMS: linux/amd64
 
 jobs:
   # Build docker image, tag it with the branch and docker image tag passed in, and publish
@@ -38,7 +38,7 @@ jobs:
         uses: docker/metadata-action@v3
         with:
           images: |
-            blockstack/${{ github.event.repository.name }}
+            dngrhm/${{ github.event.repository.name }}
           tags: |
             type=ref,event=branch
             ${{ inputs.tag }}
@@ -89,15 +89,12 @@ jobs:
           echo "GITHUB_SHA_SHORT=${GITHUB_SHA::7}" >> $GITHUB_ENV
           echo "GITHUB_REF_SHORT=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v1
-
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v3
         with:
           images: |
-            blockstack/${{ github.event.repository.name }}
+            dngrhm/${{ github.event.repository.name }}
           tags: |
             type=ref,event=branch
             ${{ env.STRETCH_TAG }}
