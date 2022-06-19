@@ -44,7 +44,7 @@ jobs:
         docker buildx build \
         --platform linux/amd64,linux/arm64,linux/arm/v8 \
         --build-arg VERSION=$VERSION \
-        --tag ${{ secrets.DOCKER_HUB_USER }}/stacks-blockchain:mainfest-arm64 \
+        --tag ${{ secrets.DOCKERHUB_USERNAME }}/stacks-blockchain:mainfest-arm64 \
         --output "type=registry" .
 
     # - uses: pguyot/arm-runner-action@v2
