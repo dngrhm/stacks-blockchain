@@ -4,6 +4,7 @@ name: Build/Release Additional Docker Platform Images
 #   - the workflow is automatically triggered during a release with the relevant tag
 #   - the workflow is started from the UI with a tag
 on:
+  workflow_dispatch:
   workflow_call:
     inputs:
       tag:
