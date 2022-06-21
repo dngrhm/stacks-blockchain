@@ -10,7 +10,9 @@ COPY . .
 
 RUN mkdir /out
 
-RUN cd testnet/stacks-node && cargo build --features monitoring_prom,slog_json --release
+ENV CARGO_LOG trace
+
+RUN cd testnet/stacks-node && cargo fetch && cargo build --features monitoring_prom,slog_json --release
 RUN cd testnet/puppet-chain && cargo build --release
 
 RUN cp target/release/stacks-node /out
