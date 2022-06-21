@@ -84,17 +84,17 @@ jobs:
   #         username: ${{ secrets.DOCKERHUB_USERNAME }}
   #         password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      - name: Build/Tag/Push Image
-        uses: docker/build-push-action@v2
-        with:
-          platforms: ${{ env.BUILD_PLATFORMS }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            STACKS_NODE_VERSION=${{ inputs.tag || env.GITHUB_SHA_SHORT }}
-            GIT_BRANCH=${{ env.GITHUB_REF_SHORT }}
-            GIT_COMMIT=${{ env.GITHUB_SHA_SHORT }}
-  #         push: true
+    - name: Build/Tag/Push Image
+      uses: docker/build-push-action@v2
+      with:
+        platforms: ${{ env.BUILD_PLATFORMS }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        build-args: |
+          STACKS_NODE_VERSION=${{ inputs.tag || env.GITHUB_SHA_SHORT }}
+          GIT_BRANCH=${{ env.GITHUB_REF_SHORT }}
+          GIT_COMMIT=${{ env.GITHUB_SHA_SHORT }}
+        push: true
 
   # # Build docker image, tag it with the branch and docker image tag passed in, and publish
   # build-publish-stretch:
