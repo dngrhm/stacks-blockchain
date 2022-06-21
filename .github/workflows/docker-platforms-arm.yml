@@ -88,6 +88,7 @@ jobs:
       uses: docker/build-push-action@v2
       with:
         platforms: ${{ env.BUILD_PLATFORMS }}
+        file: Dockerfile.stretch
         # tags: ${{ steps.meta.outputs.tags }}
         tags: ${{ secrets.DOCKERHUB_USERNAME }}/stacks-blockchain:mainfest-arm64
         labels: ${{ steps.meta.outputs.labels }}
