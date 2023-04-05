@@ -4,7 +4,6 @@ use std::sync::Mutex;
 
 use reqwest;
 
-use stacks::burnchains::Address;
 use stacks::chainstate::stacks::db::blocks::MINIMUM_TX_FEE_RATE_PER_BYTE;
 use stacks::chainstate::stacks::{
     db::blocks::MemPoolRejection, db::StacksChainState, StacksBlockHeader, StacksPrivateKey,
@@ -15,6 +14,8 @@ use stacks::clarity_vm::clarity::ClarityConnection;
 use stacks::codec::StacksMessageCodec;
 use stacks::core::mempool::MAXIMUM_MEMPOOL_TX_CHAINING;
 use stacks::core::PEER_VERSION_EPOCH_2_0;
+use stacks::core::PEER_VERSION_EPOCH_2_05;
+use stacks::core::PEER_VERSION_EPOCH_2_1;
 use stacks::net::GetIsTraitImplementedResponse;
 use stacks::net::{AccountEntryResponse, CallReadOnlyRequestBody, ContractSrcResponse};
 use stacks::types::chainstate::{StacksAddress, VRFSeed};
@@ -29,6 +30,7 @@ use stacks::vm::{
     types::{QualifiedContractIdentifier, ResponseData, TupleData},
     Value,
 };
+use stacks::{burnchains::Address, vm::ClarityVersion};
 
 use crate::config::InitialBalance;
 use crate::helium::RunLoop;
@@ -37,6 +39,8 @@ use stacks::core::StacksEpoch;
 use stacks::core::StacksEpochId;
 use stacks::vm::costs::ExecutionCost;
 use stacks::vm::types::StacksAddressExtensions;
+
+use stacks_common::types::chainstate::StacksBlockId;
 
 use super::{
     make_contract_call, make_contract_publish, make_stacks_transfer, to_addr, ADDR_4, SK_1, SK_2,
@@ -201,6 +205,7 @@ fn integration_test_get_info() {
         .callbacks
         .on_new_tenure(|round, _burnchain_tip, chain_tip, tenure| {
             let mut chainstate_copy = tenure.open_chainstate();
+            let sortdb = tenure.open_fake_sortdb();
 
             let contract_sk = StacksPrivateKey::from_hex(SK_1).unwrap();
             let principal_sk = StacksPrivateKey::from_hex(SK_2).unwrap();
@@ -217,11 +222,12 @@ fn integration_test_get_info() {
                     .mem_pool
                     .submit_raw(
                         &mut chainstate_copy,
+                        &sortdb,
                         &consensus_hash,
                         &header_hash,
                         publish_tx,
                         &ExecutionCost::max_value(),
-                        &StacksEpochId::Epoch20,
+                        &StacksEpochId::Epoch21,
                     )
                     .unwrap();
                 let publish_tx =
@@ -230,11 +236,12 @@ fn integration_test_get_info() {
                     .mem_pool
                     .submit_raw(
                         &mut chainstate_copy,
+                        &sortdb,
                         &consensus_hash,
                         &header_hash,
                         publish_tx,
                         &ExecutionCost::max_value(),
-                        &StacksEpochId::Epoch20,
+                        &StacksEpochId::Epoch21,
                     )
                     .unwrap();
                 let publish_tx =
@@ -243,13 +250,27 @@ fn integration_test_get_info() {
                     .mem_pool
                     .submit_raw(
                         &mut chainstate_copy,
+                        &sortdb,
                         &consensus_hash,
                         &header_hash,
                         publish_tx,
                         &ExecutionCost::max_value(),
-                        &StacksEpochId::Epoch20,
+                        &StacksEpochId::Epoch21,
                     )
                     .unwrap();
+
+                // store this for later, because we can't just do it in a refcell or any outer
+                // variable because this is a function pointer type, and thus can't access anything
+                // outside its scope :(
+                let tmppath = "/tmp/integration_test_get_info-old-tip";
+                let old_tip = StacksBlockId::new(&consensus_hash, &header_hash);
+                use std::fs;
+                use std::io::Write;
+                if fs::metadata(&tmppath).is_ok() {
+                    fs::remove_file(&tmppath).unwrap();
+                }
+                let mut f = fs::File::create(&tmppath).unwrap();
+                f.write_all(&old_tip.serialize_to_vec()).unwrap();
             } else if round == 2 {
                 // block-height = 3
                 let publish_tx = make_contract_publish(
@@ -264,11 +285,12 @@ fn integration_test_get_info() {
                     .mem_pool
                     .submit_raw(
                         &mut chainstate_copy,
+                        &sortdb,
                         &consensus_hash,
                         &header_hash,
                         publish_tx,
                         &ExecutionCost::max_value(),
-                        &StacksEpochId::Epoch20,
+                        &StacksEpochId::Epoch21,
                     )
                     .unwrap();
             } else if round >= 3 {
@@ -287,11 +309,12 @@ fn integration_test_get_info() {
                     .mem_pool
                     .submit_raw(
                         &mut chainstate_copy,
+                        &sortdb,
                         &consensus_hash,
                         &header_hash,
                         tx,
                         &ExecutionCost::max_value(),
-                        &StacksEpochId::Epoch20,
+                        &StacksEpochId::Epoch21,
                     )
                     .unwrap();
             }
@@ -308,11 +331,12 @@ fn integration_test_get_info() {
                     .mem_pool
                     .submit_raw(
                         &mut chainstate_copy,
+                        &sortdb,
                         &consensus_hash,
                         &header_hash,
                         tx_xfer,
                         &ExecutionCost::max_value(),
-                        &StacksEpochId::Epoch20,
+                        &StacksEpochId::Epoch21,
                     )
                     .unwrap();
             }
@@ -543,6 +567,7 @@ fn integration_test_get_info() {
                 assert!(res.nonce_proof.is_some());
                 assert!(res.balance_proof.is_some());
 
+                // account with a nonce entry but not a balance entry
                 let path = format!("{}/v2/accounts/{}",
                                    &http_origin, &contract_addr);
                 eprintln!("Test: GET {}", path);
@@ -602,7 +627,7 @@ fn integration_test_get_info() {
                 eprintln!("Test: GET {}", path);
                 let res = client.get(&path).send().unwrap().json::<ContractInterface>().unwrap();
 
-                let contract_analysis = mem_type_check(GET_INFO_CONTRACT).unwrap().1;
+                let contract_analysis = mem_type_check(GET_INFO_CONTRACT, ClarityVersion::Clarity2, StacksEpochId::Epoch21).unwrap().1;
                 let expected_interface = build_contract_interface(&contract_analysis);
 
                 eprintln!("{}", serde_json::to_string(&expected_interface).unwrap());
@@ -647,6 +672,7 @@ fn integration_test_get_info() {
 
                 let body = CallReadOnlyRequestBody {
                     sender: "'SP139Q3N9RXCJCD1XVA4N5RYWQ5K9XQ0T9PKQ8EE5".into(),
+                    sponsor: None,
                     arguments: vec![Value::UInt(3).serialize()]
                 };
 
@@ -668,6 +694,7 @@ fn integration_test_get_info() {
 
                 let body = CallReadOnlyRequestBody {
                     sender: "'SP139Q3N9RXCJCD1XVA4N5RYWQ5K9XQ0T9PKQ8EE5".into(),
+                    sponsor: None,
                     arguments: vec![]
                 };
 
@@ -694,6 +721,7 @@ fn integration_test_get_info() {
 
                 let body = CallReadOnlyRequestBody {
                     sender: "'SP139Q3N9RXCJCD1XVA4N5RYWQ5K9XQ0T9PKQ8EE5".into(),
+                    sponsor: None,
                     arguments: vec![]
                 };
 
@@ -712,6 +740,7 @@ fn integration_test_get_info() {
 
                 let body = CallReadOnlyRequestBody {
                     sender: "'SP139Q3N9RXCJCD1XVA4N5RYWQ5K9XQ0T9PKQ8EE5".into(),
+                    sponsor: None,
                     arguments: vec![Value::UInt(3).serialize()]
                 };
 
@@ -734,6 +763,7 @@ fn integration_test_get_info() {
 
                 let body = CallReadOnlyRequestBody {
                     sender: "'SP139Q3N9RXCJCD1XVA4N5RYWQ5K9XQ0T9PKQ8EE5".into(),
+                    sponsor: None,
                     arguments: vec![Value::UInt(100).serialize()]
                 };
 
@@ -752,6 +782,7 @@ fn integration_test_get_info() {
 
                 let body = CallReadOnlyRequestBody {
                     sender: "'SP139Q3N9RXCJCD1XVA4N5RYWQ5K9XQ0T9PKQ8EE5".into(),
+                    sponsor: None,
                     arguments: vec![]
                 };
 
@@ -853,7 +884,18 @@ fn integration_test_get_info() {
 
                 // test query parameters for v2/trait endpoint
                 // evaluate check for explicit compliance against the chain tip of the first block (contract DNE at that block)
-                let path = format!("{}/v2/traits/{}/{}/{}/{}/{}?tip=753d84de5c475a85abd0eeb3ac87da03ff0f794507b60a3f66356425bc1dedaf", &http_origin, &contract_addr, "impl-trait-contract", &contract_addr, "get-info",  "trait-1");
+
+                // Recover the stored tip
+                let tmppath = "/tmp/integration_test_get_info-old-tip";
+                use std::fs;
+                use std::io::Read;
+                let mut f = fs::File::open(&tmppath).unwrap();
+                let mut buf = vec![];
+                f.read_to_end(&mut buf).unwrap();
+                let old_tip = StacksBlockId::consensus_deserialize(&mut &buf[..]).unwrap();
+
+                let path = format!("{}/v2/traits/{}/{}/{}/{}/{}?tip={}", &http_origin, &contract_addr, "impl-trait-contract", &contract_addr, "get-info",  "trait-1", &old_tip);
+
                 let res = client.get(&path).send().unwrap();
                 eprintln!("Test: GET {}", path);
                 assert_eq!(res.text().unwrap(), "No contract analysis found or trait definition not found");
@@ -1060,6 +1102,7 @@ fn contract_stx_transfer() {
         .callbacks
         .on_new_tenure(|round, _burnchain_tip, chain_tip, tenure| {
             let mut chainstate_copy = tenure.open_chainstate();
+            let sortdb = tenure.open_fake_sortdb();
 
             let contract_sk = StacksPrivateKey::from_hex(SK_1).unwrap();
             let sk_2 = StacksPrivateKey::from_hex(SK_2).unwrap();
@@ -1082,11 +1125,12 @@ fn contract_stx_transfer() {
                     .mem_pool
                     .submit_raw(
                         &mut chainstate_copy,
+                        &sortdb,
                         &consensus_hash,
                         &header_hash,
                         xfer_to_contract,
                         &ExecutionCost::max_value(),
-                        &StacksEpochId::Epoch20,
+                        &StacksEpochId::Epoch21,
                     )
                     .unwrap();
             } else if round == 2 {
@@ -1097,11 +1141,12 @@ fn contract_stx_transfer() {
                     .mem_pool
                     .submit_raw(
                         &mut chainstate_copy,
+                        &sortdb,
                         &consensus_hash,
                         &header_hash,
                         publish_tx,
                         &ExecutionCost::max_value(),
-                        &StacksEpochId::Epoch20,
+                        &StacksEpochId::Epoch21,
                     )
                     .unwrap();
             } else if round == 3 {
@@ -1117,11 +1162,12 @@ fn contract_stx_transfer() {
                     .mem_pool
                     .submit_raw(
                         &mut chainstate_copy,
+                        &sortdb,
                         consensus_hash,
                         block_hash,
                         publish_tx,
                         &ExecutionCost::max_value(),
-                        &StacksEpochId::Epoch20,
+                        &StacksEpochId::Epoch21,
                     )
                     .unwrap();
 
@@ -1138,11 +1184,12 @@ fn contract_stx_transfer() {
                     .mem_pool
                     .submit_raw(
                         &mut chainstate_copy,
+                        &sortdb,
                         &consensus_hash,
                         &header_hash,
                         tx,
                         &ExecutionCost::max_value(),
-                        &StacksEpochId::Epoch20,
+                        &StacksEpochId::Epoch21,
                     )
                     .unwrap();
             } else if round == 4 {
@@ -1162,12 +1209,13 @@ fn contract_stx_transfer() {
                         .mem_pool
                         .submit(
                             &mut chainstate_copy,
+                            &sortdb,
                             &consensus_hash,
                             &header_hash,
                             &xfer_to_contract,
                             None,
                             &ExecutionCost::max_value(),
-                            &StacksEpochId::Epoch20,
+                            &StacksEpochId::Epoch21,
                         )
                         .unwrap();
                 }
@@ -1180,12 +1228,13 @@ fn contract_stx_transfer() {
                     .mem_pool
                     .submit(
                         &mut chainstate_copy,
+                        &sortdb,
                         &consensus_hash,
                         &header_hash,
                         &xfer_to_contract,
                         None,
                         &ExecutionCost::max_value(),
-                        &StacksEpochId::Epoch20,
+                        &StacksEpochId::Epoch21,
                     )
                     .unwrap_err()
                 {
@@ -1227,7 +1276,7 @@ fn contract_stx_transfer() {
                                         db.get_account_stx_balance(
                                             &contract_identifier.clone().into(),
                                         )
-                                        .amount_unlocked
+                                        .amount_unlocked()
                                     })
                                 }
                             )
@@ -1244,7 +1293,7 @@ fn contract_stx_transfer() {
                                 &StacksBlockHeader::make_index_block_hash(&cur_tip.0, &cur_tip.1),
                                 |conn| {
                                     conn.with_clarity_db_readonly(|db| {
-                                        db.get_account_stx_balance(&addr_3).amount_unlocked
+                                        db.get_account_stx_balance(&addr_3).amount_unlocked()
                                     })
                                 }
                             )
@@ -1278,7 +1327,7 @@ fn contract_stx_transfer() {
                                 &StacksBlockHeader::make_index_block_hash(&cur_tip.0, &cur_tip.1),
                                 |conn| {
                                     conn.with_clarity_db_readonly(|db| {
-                                        db.get_account_stx_balance(&addr_2).amount_unlocked
+                                        db.get_account_stx_balance(&addr_2).amount_unlocked()
                                     })
                                 }
                             )
@@ -1296,7 +1345,7 @@ fn contract_stx_transfer() {
                                         db.get_account_stx_balance(
                                             &contract_identifier.clone().into(),
                                         )
-                                        .amount_unlocked
+                                        .amount_unlocked()
                                     })
                                 }
                             )
@@ -1328,7 +1377,7 @@ fn contract_stx_transfer() {
                                         db.get_account_stx_balance(
                                             &contract_identifier.clone().into(),
                                         )
-                                        .amount_unlocked
+                                        .amount_unlocked()
                                     })
                                 }
                             )
@@ -1345,7 +1394,7 @@ fn contract_stx_transfer() {
                                 &StacksBlockHeader::make_index_block_hash(&cur_tip.0, &cur_tip.1),
                                 |conn| {
                                     conn.with_clarity_db_readonly(|db| {
-                                        db.get_account_stx_balance(&addr_3).amount_unlocked
+                                        db.get_account_stx_balance(&addr_3).amount_unlocked()
                                     })
                                 }
                             )
@@ -1378,6 +1427,7 @@ fn mine_transactions_out_of_order() {
         .callbacks
         .on_new_tenure(|round, _burnchain_tip, chain_tip, tenure| {
             let mut chainstate_copy = tenure.open_chainstate();
+            let sortdb = tenure.open_fake_sortdb();
 
             let sk = StacksPrivateKey::from_hex(SK_3).unwrap();
             let header_hash = chain_tip.block.block_hash();
@@ -1398,11 +1448,12 @@ fn mine_transactions_out_of_order() {
                     .mem_pool
                     .submit_raw(
                         &mut chainstate_copy,
+                        &sortdb,
                         &consensus_hash,
                         &header_hash,
                         xfer_to_contract,
                         &ExecutionCost::max_value(),
-                        &StacksEpochId::Epoch20,
+                        &StacksEpochId::Epoch21,
                     )
                     .unwrap();
             } else if round == 2 {
@@ -1412,11 +1463,12 @@ fn mine_transactions_out_of_order() {
                     .mem_pool
                     .submit_raw(
                         &mut chainstate_copy,
+                        &sortdb,
                         &consensus_hash,
                         &header_hash,
                         publish_tx,
                         &ExecutionCost::max_value(),
-                        &StacksEpochId::Epoch20,
+                        &StacksEpochId::Epoch21,
                     )
                     .unwrap();
             } else if round == 3 {
@@ -1426,11 +1478,12 @@ fn mine_transactions_out_of_order() {
                     .mem_pool
                     .submit_raw(
                         &mut chainstate_copy,
+                        &sortdb,
                         &consensus_hash,
                         &header_hash,
                         xfer_to_contract,
                         &ExecutionCost::max_value(),
-                        &StacksEpochId::Epoch20,
+                        &StacksEpochId::Epoch21,
                     )
                     .unwrap();
             } else if round == 4 {
@@ -1440,11 +1493,12 @@ fn mine_transactions_out_of_order() {
                     .mem_pool
                     .submit_raw(
                         &mut chainstate_copy,
+                        &sortdb,
                         &consensus_hash,
                         &header_hash,
                         xfer_to_contract,
                         &ExecutionCost::max_value(),
-                        &StacksEpochId::Epoch20,
+                        &StacksEpochId::Epoch21,
                     )
                     .unwrap();
             }
@@ -1493,7 +1547,7 @@ fn mine_transactions_out_of_order() {
                                         db.get_account_stx_balance(
                                             &contract_identifier.clone().into(),
                                         )
-                                        .amount_unlocked
+                                        .amount_unlocked()
                                     })
                                 }
                             )
@@ -1529,6 +1583,7 @@ fn mine_contract_twice() {
         .callbacks
         .on_new_tenure(|round, _burnchain_tip, _chain_tip, tenure| {
             let mut chainstate_copy = tenure.open_chainstate();
+            let sortdb = tenure.open_fake_sortdb();
             let contract_sk = StacksPrivateKey::from_hex(SK_1).unwrap();
 
             if round == 1 {
@@ -1543,11 +1598,12 @@ fn mine_contract_twice() {
                     .mem_pool
                     .submit_raw(
                         &mut chainstate_copy,
+                        &sortdb,
                         consensus_hash,
                         block_hash,
                         publish_tx,
                         &ExecutionCost::max_value(),
-                        &StacksEpochId::Epoch20,
+                        &StacksEpochId::Epoch21,
                     )
                     .unwrap();
 
@@ -1614,6 +1670,7 @@ fn bad_contract_tx_rollback() {
         .callbacks
         .on_new_tenure(|round, _burnchain_tip, _chain_tip, tenure| {
             let mut chainstate_copy = tenure.open_chainstate();
+            let sortdb = tenure.open_fake_sortdb();
 
             let contract_sk = StacksPrivateKey::from_hex(SK_1).unwrap();
             let sk_2 = StacksPrivateKey::from_hex(SK_2).unwrap();
@@ -1639,11 +1696,12 @@ fn bad_contract_tx_rollback() {
                     .mem_pool
                     .submit_raw(
                         &mut chainstate_copy,
+                        &sortdb,
                         consensus_hash,
                         block_hash,
                         xfer_to_contract,
                         &ExecutionCost::max_value(),
-                        &StacksEpochId::Epoch20,
+                        &StacksEpochId::Epoch21,
                     )
                     .unwrap();
             } else if round == 2 {
@@ -1657,11 +1715,12 @@ fn bad_contract_tx_rollback() {
                     .mem_pool
                     .submit_raw(
                         &mut chainstate_copy,
+                        &sortdb,
                         consensus_hash,
                         block_hash,
                         xfer_to_contract,
                         &ExecutionCost::max_value(),
-                        &StacksEpochId::Epoch20,
+                        &StacksEpochId::Epoch21,
                     )
                     .unwrap();
 
@@ -1671,11 +1730,12 @@ fn bad_contract_tx_rollback() {
                     .mem_pool
                     .submit_raw(
                         &mut chainstate_copy,
+                        &sortdb,
                         consensus_hash,
                         block_hash,
                         xfer_to_contract,
                         &ExecutionCost::max_value(),
-                        &StacksEpochId::Epoch20,
+                        &StacksEpochId::Epoch21,
                     )
                     .unwrap();
 
@@ -1685,11 +1745,12 @@ fn bad_contract_tx_rollback() {
                     .mem_pool
                     .submit_raw(
                         &mut chainstate_copy,
+                        &sortdb,
                         consensus_hash,
                         block_hash,
                         publish_tx,
                         &ExecutionCost::max_value(),
-                        &StacksEpochId::Epoch20,
+                        &StacksEpochId::Epoch21,
                     )
                     .unwrap();
 
@@ -1699,11 +1760,12 @@ fn bad_contract_tx_rollback() {
                     .mem_pool
                     .submit_raw(
                         &mut chainstate_copy,
+                        &sortdb,
                         consensus_hash,
                         block_hash,
                         publish_tx,
                         &ExecutionCost::max_value(),
-                        &StacksEpochId::Epoch20,
+                        &StacksEpochId::Epoch21,
                     )
                     .unwrap();
             }
@@ -1741,7 +1803,7 @@ fn bad_contract_tx_rollback() {
                                         db.get_account_stx_balance(
                                             &contract_identifier.clone().into(),
                                         )
-                                        .amount_unlocked
+                                        .amount_unlocked()
                                     })
                                 }
                             )
@@ -1758,7 +1820,7 @@ fn bad_contract_tx_rollback() {
                                 &StacksBlockHeader::make_index_block_hash(&cur_tip.0, &cur_tip.1),
                                 |conn| {
                                     conn.with_clarity_db_readonly(|db| {
-                                        db.get_account_stx_balance(&addr_3).amount_unlocked
+                                        db.get_account_stx_balance(&addr_3).amount_unlocked()
                                     })
                                 }
                             )
@@ -1845,21 +1907,68 @@ fn make_keys(seed: &str, count: u64) -> Vec<StacksPrivateKey> {
 fn block_limit_runtime_test() {
     let mut conf = super::new_test_conf();
 
-    conf.burnchain.epochs = Some(vec![StacksEpoch {
-        epoch_id: StacksEpochId::Epoch20,
-        start_height: 0,
-        end_height: 9223372036854775807,
-        block_limit: ExecutionCost {
-            write_length: 150000000,
-            write_count: 50000,
-            read_length: 1000000000,
-            read_count: 50000,
-            // use a shorter runtime limit. the current runtime limit
-            //    is _painfully_ slow in a opt-level=0 build (i.e., `cargo test`)
-            runtime: 1_000_000_000,
+    conf.burnchain.epochs = Some(vec![
+        StacksEpoch {
+            epoch_id: StacksEpochId::Epoch10,
+            start_height: 0,
+            end_height: 0,
+            block_limit: ExecutionCost {
+                write_length: 150000000,
+                write_count: 50000,
+                read_length: 1000000000,
+                read_count: 50000,
+                // use a shorter runtime limit. the current runtime limit
+                //    is _painfully_ slow in a opt-level=0 build (i.e., `cargo test`)
+                runtime: 1_000_000_000,
+            },
+            network_epoch: PEER_VERSION_EPOCH_2_0,
         },
-        network_epoch: PEER_VERSION_EPOCH_2_0,
-    }]);
+        StacksEpoch {
+            epoch_id: StacksEpochId::Epoch20,
+            start_height: 0,
+            end_height: 0,
+            block_limit: ExecutionCost {
+                write_length: 150000000,
+                write_count: 50000,
+                read_length: 1000000000,
+                read_count: 50000,
+                // use a shorter runtime limit. the current runtime limit
+                //    is _painfully_ slow in a opt-level=0 build (i.e., `cargo test`)
+                runtime: 1_000_000_000,
+            },
+            network_epoch: PEER_VERSION_EPOCH_2_0,
+        },
+        StacksEpoch {
+            epoch_id: StacksEpochId::Epoch2_05,
+            start_height: 0,
+            end_height: 0,
+            block_limit: ExecutionCost {
+                write_length: 150000000,
+                write_count: 50000,
+                read_length: 1000000000,
+                read_count: 50000,
+                // use a shorter runtime limit. the current runtime limit
+                //    is _painfully_ slow in a opt-level=0 build (i.e., `cargo test`)
+                runtime: 1_000_000_000,
+            },
+            network_epoch: PEER_VERSION_EPOCH_2_05,
+        },
+        StacksEpoch {
+            epoch_id: StacksEpochId::Epoch21,
+            start_height: 0,
+            end_height: 9223372036854775807,
+            block_limit: ExecutionCost {
+                write_length: 150000000,
+                write_count: 50000,
+                read_length: 1000000000,
+                read_count: 50000,
+                // use a shorter runtime limit. the current runtime limit
+                //    is _painfully_ slow in a opt-level=0 build (i.e., `cargo test`)
+                runtime: 2_665_574 * 3,
+            },
+            network_epoch: PEER_VERSION_EPOCH_2_1,
+        },
+    ]);
     conf.burnchain.commit_anchor_block_within = 5000;
 
     let contract_sk = StacksPrivateKey::from_hex(SK_1).unwrap();
@@ -1878,6 +1987,7 @@ fn block_limit_runtime_test() {
         .callbacks
         .on_new_tenure(|round, _burnchain_tip, _chain_tip, tenure| {
             let mut chainstate_copy = tenure.open_chainstate();
+            let sortdb = tenure.open_fake_sortdb();
 
             let contract_sk = StacksPrivateKey::from_hex(SK_1).unwrap();
             let _contract_identifier = QualifiedContractIdentifier::parse(&format!(
@@ -1903,11 +2013,12 @@ fn block_limit_runtime_test() {
                     .mem_pool
                     .submit_raw(
                         &mut chainstate_copy,
+                        &sortdb,
                         consensus_hash,
                         block_hash,
                         publish_tx,
                         &ExecutionCost::max_value(),
-                        &StacksEpochId::Epoch20,
+                        &StacksEpochId::Epoch21,
                     )
                     .unwrap();
             } else if round > 1 {
@@ -1932,11 +2043,12 @@ fn block_limit_runtime_test() {
                         .mem_pool
                         .submit_raw(
                             &mut chainstate_copy,
+                            &sortdb,
                             consensus_hash,
                             block_hash,
                             tx,
                             &ExecutionCost::max_value(),
-                            &StacksEpochId::Epoch20,
+                            &StacksEpochId::Epoch21,
                         )
                         .unwrap();
                 }
@@ -2005,6 +2117,7 @@ fn mempool_errors() {
         .on_new_tenure(|round, _burnchain_tip, chain_tip, tenure| {
             let contract_sk = StacksPrivateKey::from_hex(SK_1).unwrap();
             let mut chainstate_copy = tenure.open_chainstate();
+            let sortdb = tenure.open_fake_sortdb();
 
             let header_hash = chain_tip.block.block_hash();
             let consensus_hash = chain_tip.metadata.consensus_hash;
@@ -2018,11 +2131,12 @@ fn mempool_errors() {
                     .mem_pool
                     .submit_raw(
                         &mut chainstate_copy,
+                        &sortdb,
                         &consensus_hash,
                         &header_hash,
                         publish_tx,
                         &ExecutionCost::max_value(),
-                        &StacksEpochId::Epoch20,
+                        &StacksEpochId::Epoch21,
                     )
                     .unwrap();
             }
