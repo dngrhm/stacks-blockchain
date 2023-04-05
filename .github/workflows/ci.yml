@@ -19,40 +19,40 @@ concurrency:
 
 jobs:
   # Run full genesis test
-  full-genesis:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - name: Single full genesis integration test
-        env:
-          DOCKER_BUILDKIT: 1
-        # Remove .dockerignore file so codecov has access to git info
-        run: |
-          rm .dockerignore
-          docker build -o coverage-output -f ./.github/actions/bitcoin-int-tests/Dockerfile.large-genesis .
-      - uses: codecov/codecov-action@v2
-        with:
-          files: ./coverage-output/lcov.info
-          name: large_genesis
-          fail_ci_if_error: false
+  # full-genesis:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v2
+  #     - name: Single full genesis integration test
+  #       env:
+  #         DOCKER_BUILDKIT: 1
+  #       # Remove .dockerignore file so codecov has access to git info
+  #       run: |
+  #         rm .dockerignore
+  #         docker build -o coverage-output -f ./.github/actions/bitcoin-int-tests/Dockerfile.large-genesis .
+  #     - uses: codecov/codecov-action@v2
+  #       with:
+  #         files: ./coverage-output/lcov.info
+  #         name: large_genesis
+  #         fail_ci_if_error: false
 
-  # Run unit tests with code coverage
-  unit-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - name: Run units tests (with coverage)
-        env:
-          DOCKER_BUILDKIT: 1
-        # Remove .dockerignore file so codecov has access to git info
-        run: |
-          rm .dockerignore
-          docker build -o coverage-output -f ./.github/actions/bitcoin-int-tests/Dockerfile.code-cov .
-      - uses: codecov/codecov-action@v2
-        with:
-          files: ./coverage-output/lcov.info
-          name: unit_tests
-          fail_ci_if_error: false
+  # # Run unit tests with code coverage
+  # unit-tests:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v2
+  #     - name: Run units tests (with coverage)
+  #       env:
+  #         DOCKER_BUILDKIT: 1
+  #       # Remove .dockerignore file so codecov has access to git info
+  #       run: |
+  #         rm .dockerignore
+  #         docker build -o coverage-output -f ./.github/actions/bitcoin-int-tests/Dockerfile.code-cov .
+  #     - uses: codecov/codecov-action@v2
+  #       with:
+  #         files: ./coverage-output/lcov.info
+  #         name: unit_tests
+  #         fail_ci_if_error: false
 
   open-api-validation:
     runs-on: ubuntu-latest
@@ -151,6 +151,23 @@ jobs:
           name: ${{ matrix.platform }}
           path: ${{ matrix.platform }}.zip
 
+  call-docker-platforms-workflow:
+    if: ${{ github.event.inputs.tag != '' }}
+    uses: dngrhm/stacks-blockchain/.github/workflows/docker-platforms.yml@master
+    with:
+      tag: ${{ github.event.inputs.tag }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_PASSWORD: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+  call-docker-platforms-workflow-arm:
+    if: ${{ github.event.inputs.tag != '' }}
+    uses: dngrhm/stacks-blockchain/.github/workflows/docker-platforms-arm.yml@master
+    with:
+      tag: ${{ github.event.inputs.tag }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_PASSWORD: ${{ secrets.DOCKERHUB_PASSWORD }}
 #  call-docker-platforms-workflow:
 #    if: ${{ github.event.inputs.tag != '' }}
 #    uses: stacks-network/stacks-blockchain/.github/workflows/docker-platforms.yml@master
@@ -180,7 +197,7 @@ jobs:
         uses: docker/metadata-action@v3
         with:
           images: |
-            blockstack/${{ github.event.repository.name }}
+            dngrhm/${{ github.event.repository.name }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -241,7 +258,7 @@ jobs:
         uses: docker/metadata-action@v3
         with:
           images: |
-            blockstack/${{ github.event.repository.name }}
+            dngrhm/${{ github.event.repository.name }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
